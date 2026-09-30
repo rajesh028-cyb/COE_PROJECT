@@ -33,6 +33,7 @@ def test_create_and_get_case(test_client):
     detail = get_res.json()
     assert detail["case_id"] == "P001"
     assert len(detail["risk_indicators"]) > 0
+    assert len(detail["audit_logs"]) >= 1
 
     # 3. Submit Human Review via POST /api/cases/P001/review
     review_payload = {
@@ -58,10 +59,46 @@ def test_create_and_get_case(test_client):
     assert assigned_data["assigned_to"] == "Staff A"
     assert assigned_data["status"] == "Follow-up Pending"
 
-def test_dashboard_stats_endpoint(test_client):
+    # 5. Send Simulated Patient Notification via POST /api/cases/P001/notify
+    notify_payload = {
+        "channel": "SMS",
+        "recipient": "+1 (555) 345-6789",
+        "template_type": "Safety Check-in",
+        "message_body": "Hospital Crisis Support: We have received your urgent request and a clinician is calling you now.",
+        "sent_by": "Staff Clinician A"
+    }
+    notify_res = test_client.post("/api/cases/P001/notify", json=notify_payload)
+    assert notify_res.status_code == 200
+    notified_data = notify_res.json()
+    assert len(notified_data["notifications"]) == 1
+    assert notified_data["notifications"][0]["template_type"] == "Safety Check-in"
+
+    # 6. Resolve Case via POST /api/cases/P001/resolve
+    resolve_payload = {
+        "disposition": "Safety Plan Formed",
+        "notes": "Direct telephone assessment completed; verified safety with family member present.",
+        "resolved_by": "Staff Clinician A"
+    }
+    resolve_res = test_client.post("/api/cases/P001/resolve", json=resolve_payload)
+    assert resolve_res.status_code == 200
+    resolved_data = resolve_res.json()
+    assert resolved_data["status"] == "Resolved"
+    assert resolved_data["resolution_disposition"] == "Safety Plan Formed"
+
+def test_dashboard_stats_and_csv_export(test_client):
+    # Dashboard stats
     res = test_client.get("/api/dashboard/stats")
     assert res.status_code == 200
     stats = res.json()
     assert stats["total_cases"] >= 1
     assert "high_priority_count" in stats
     assert "priority_distribution" in stats
+    assert "resolved_count" in stats
+    assert "request_type_distribution" in stats
+
+    # CSV Export
+    csv_res = test_client.get("/api/dashboard/export/csv")
+    assert csv_res.status_code == 200
+    assert "text/csv" in csv_res.headers["content-type"]
+    assert "Case ID" in csv_res.text
+    assert "P001" in csv_res.text

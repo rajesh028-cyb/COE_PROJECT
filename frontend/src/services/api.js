@@ -83,3 +83,37 @@ export async function assignStaff(caseId, assignData) {
     throw err;
   }
 }
+
+export async function resolveCase(caseId, resolveData) {
+  try {
+    const res = await fetch(`${API_BASE_URL}/cases/${caseId}/resolve`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(resolveData)
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+    return await res.json();
+  } catch (err) {
+    console.error(`Error resolving case ${caseId}:`, err);
+    throw err;
+  }
+}
+
+export async function sendNotification(caseId, notifyData) {
+  try {
+    const res = await fetch(`${API_BASE_URL}/cases/${caseId}/notify`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(notifyData)
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}: ${res.statusText}`);
+    return await res.json();
+  } catch (err) {
+    console.error(`Error sending notification for ${caseId}:`, err);
+    throw err;
+  }
+}
+
+export function getExportCsvUrl() {
+  return `${API_BASE_URL}/dashboard/export/csv`;
+}

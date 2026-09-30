@@ -24,3 +24,30 @@
 ::-webkit-scrollbar-thumb:hover {
   background: #94a3b8;
 }
+
+/* Print Stylesheet for Clinical Dossier Handover Export */
+@media print {
+  header, 
+  nav, 
+  button, 
+  a[href], 
+  input, 
+  select, 
+  textarea {
+    display: none !important;
+  }
+
+  body {
+    background: white !important;
+    color: black !important;
+    font-size: 11pt;
+  }
+
+  .shadow-xs, .shadow-md, .shadow-lg {
+    box-shadow: none !important;
+  }
+
+  .border {
+    border-color: #cbd5e1 !important;
+  }
+}

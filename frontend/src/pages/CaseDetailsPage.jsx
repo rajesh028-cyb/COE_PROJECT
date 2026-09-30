@@ -1,12 +1,16 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { fetchCaseDetail, submitHumanReview, assignStaff } from '../services/api';
+import { 
+  fetchCaseDetail, submitHumanReview, assignStaff, 
+  resolveCase, sendNotification 
+} from '../services/api';
 import PriorityBadge from '../components/PriorityBadge';
 import StatusBadge from '../components/StatusBadge';
 import DisclaimerBanner from '../components/DisclaimerBanner';
 import { 
-  ArrowLeft, ShieldAlert, CheckCircle2, 
-  UserCheck, AlertTriangle, FileText, Calendar, CheckSquare, User 
+  ArrowLeft, ShieldAlert, CheckCircle2, UserCheck, AlertTriangle, 
+  FileText, Calendar, CheckSquare, User, Send, MessageSquare, 
+  Printer, History, PhoneCall, Mail, CheckCircle, Clock, ShieldCheck
 } from 'lucide-react';
 
 export default function CaseDetailsPage() {
@@ -31,6 +35,21 @@ export default function CaseDetailsPage() {
   const [submittingAssignment, setSubmittingAssignment] = useState(false);
   const [assignMessage, setAssignMessage] = useState(null);
 
+  // Resolution Form State
+  const [resolutionDisposition, setResolutionDisposition] = useState('Follow-up Call Completed');
+  const [resolutionNotes, setResolutionNotes] = useState('');
+  const [resolvedByName, setResolvedByName] = useState('Staff Clinician A');
+  const [submittingResolution, setSubmittingResolution] = useState(false);
+  const [resolutionMessage, setResolutionMessage] = useState(null);
+
+  // Notification / Patient Communication Simulator State
+  const [notifChannel, setNotifChannel] = useState('SMS');
+  const [notifRecipient, setNotifRecipient] = useState('+1 (555) 234-5678');
+  const [notifTemplate, setNotifTemplate] = useState('Safety Check-in');
+  const [notifBody, setNotifBody] = useState('Hospital Support: We have received your post-discharge request. A clinician has been assigned and is reaching out to you.');
+  const [submittingNotif, setSubmittingNotif] = useState(false);
+  const [notifSuccessMessage, setNotifSuccessMessage] = useState(null);
+
   const loadCase = async () => {
     setLoading(true);
     setError(null);
@@ -38,6 +57,10 @@ export default function CaseDetailsPage() {
       const data = await fetchCaseDetail(caseId);
       setCaseData(data);
       setOverridePriority(data.system_priority || 'HIGH');
+      if (data.contact_method === 'Email') {
+        setNotifChannel('Email');
+        setNotifRecipient('patient.care@example.com');
+      }
     } catch (err) {
       setError(`Failed to load details for case ${caseId}. Ensure backend is running.`);
     } finally {
@@ -65,7 +88,7 @@ export default function CaseDetailsPage() {
       });
 
       setCaseData(updatedCase);
-      setReviewMessage('Human review successfully recorded.');
+      setReviewMessage('Human review decision successfully recorded in audit log.');
     } catch (err) {
       setError('Failed to submit review.');
     } finally {
@@ -86,11 +109,68 @@ export default function CaseDetailsPage() {
       });
 
       setCaseData(updatedCase);
-      setAssignMessage(`Case assigned to ${assignedStaff} with follow-up set for ${dueTime}.`);
+      setAssignMessage(`Case assigned to ${assignedStaff} with follow-up target: ${dueTime}.`);
     } catch (err) {
       setError('Failed to assign staff member.');
     } finally {
       setSubmittingAssignment(false);
+    }
+  };
+
+  const handleResolveSubmit = async (e) => {
+    e.preventDefault();
+    setSubmittingResolution(true);
+    setResolutionMessage(null);
+
+    try {
+      const updatedCase = await resolveCase(caseId, {
+        disposition: resolutionDisposition,
+        notes: resolutionNotes || 'Case resolved and closed following clinical protocol.',
+        resolved_by: resolvedByName
+      });
+
+      setCaseData(updatedCase);
+      setResolutionMessage('Case successfully marked as Resolved & Closed.');
+    } catch (err) {
+      setError('Failed to resolve case.');
+    } finally {
+      setSubmittingResolution(false);
+    }
+  };
+
+  const handleSendNotification = async (e) => {
+    e.preventDefault();
+    setSubmittingNotif(true);
+    setNotifSuccessMessage(null);
+
+    try {
+      const updatedCase = await sendNotification(caseId, {
+        channel: notifChannel,
+        recipient: notifRecipient,
+        template_type: notifTemplate,
+        message_body: notifBody,
+        sent_by: reviewerName || 'Clinical Coordinator'
+      });
+
+      setCaseData(updatedCase);
+      setNotifSuccessMessage(`Simulated ${notifChannel} delivered successfully to ${notifRecipient}.`);
+    } catch (err) {
+      setError('Failed to send notification.');
+    } finally {
+      setSubmittingNotif(false);
+    }
+  };
+
+  const applyTemplate = (type) => {
+    setNotifTemplate(type);
+    if (type === 'Safety Check-in') {
+      setNotifBody('Hospital Crisis Support: We have received your urgent message. A clinician is calling you directly right now. If you are in immediate physical danger, please call 988 or 911.');
+    } else if (type === 'Clinician Assigned') {
+      setNotifBody(`Hello, your support request has been assigned to ${assignedStaff}. A clinician will connect with you by ${dueTime}.`);
+    } else if (type === 'Appointment Scheduled') {
+      setNotifBody('Hospital Post-Discharge Team: Your outpatient follow-up appointment has been scheduled for tomorrow at 2:00 PM with Dr. Reynolds.');
+    } else if (type === 'Crisis Resources') {
+      setNotifBody('Mental Health Support Resources: 24/7 Suicide & Crisis Lifeline: 988. Hospital Direct Helpline: (555) 019-2834. You are not alone.');
     }
   };
 
@@ -121,8 +201,8 @@ export default function CaseDetailsPage() {
   return (
     <div className="max-w-5xl mx-auto px-4 py-8 space-y-8">
       
-      {/* Top Navigation */}
-      <div>
+      {/* Top Navigation & Action Bar */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <Link
           to="/dashboard"
           className="inline-flex items-center space-x-2 text-slate-600 hover:text-slate-900 text-xs font-bold tracking-wide transition-colors"
@@ -130,20 +210,29 @@ export default function CaseDetailsPage() {
           <ArrowLeft className="w-4 h-4 text-sky-600" />
           <span>Back to Urgency Triage Dashboard</span>
         </Link>
+
+        {/* Print / Save Clinical Report */}
+        <button
+          onClick={() => window.print()}
+          className="inline-flex items-center space-x-2 px-3.5 py-1.5 bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 text-xs font-semibold rounded-xl shadow-2xs transition-all"
+        >
+          <Printer className="w-3.5 h-3.5 text-slate-600" />
+          <span>Print / PDF Clinical Report</span>
+        </button>
       </div>
 
       {/* Case Header Card */}
       <div className="bg-white border border-sky-100 rounded-2xl p-6 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-6">
         <div>
-          <div className="flex items-center gap-3 mb-2">
+          <div className="flex flex-wrap items-center gap-3 mb-2">
             <h1 className="text-3xl font-extrabold text-sky-700 font-mono tracking-tight">
               Case {caseData.case_id}
             </h1>
-            <PriorityBadge priority={latestReview ? latestReview.final_priority : caseData.system_priority} />
+            <PriorityBadge priority={caseData.system_priority} />
             <StatusBadge status={caseData.status} />
           </div>
           <p className="text-xs text-slate-500">
-            Created: {new Date(caseData.created_at).toLocaleString()}
+            Intake Registered: {new Date(caseData.created_at).toLocaleString()}
           </p>
         </div>
 
@@ -158,377 +247,520 @@ export default function CaseDetailsPage() {
             <span className="font-bold text-slate-900">{caseData.waiting_time_minutes} min</span>
           </div>
           <div>
-            <span className="text-slate-500 block font-medium">Assigned Staff</span>
-            <span className="font-bold text-slate-900">{caseData.assigned_to || 'Unassigned'}</span>
+            <span className="text-slate-500 block font-medium">Preferred Contact</span>
+            <span className="font-bold text-slate-900">{caseData.contact_method || 'Phone'}</span>
           </div>
         </div>
       </div>
 
-      {/* Prominent Human Review Disclaimer */}
+      {/* Mandatory Human Review Disclaimer Banner */}
       <DisclaimerBanner />
 
-      {/* Section 1: Patient Request Text */}
-      <div className="bg-white border border-sky-100 rounded-2xl p-6 shadow-xs space-y-3">
-        <div className="flex items-center gap-2 text-sm font-bold text-slate-900 border-b border-slate-100 pb-3">
-          <FileText className="w-4 h-4 text-sky-600" />
-          <span>Patient Request Message</span>
-        </div>
-        <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 text-slate-900 text-sm leading-relaxed font-sans font-medium">
-          "{caseData.message}"
-        </div>
-        <div className="text-xs text-slate-500 flex items-center justify-between">
-          <span>Preferred Contact: <strong className="text-slate-800">{caseData.contact_method}</strong></span>
-          <span>Submitted via post-discharge support portal</span>
-        </div>
-      </div>
-
-      {/* Grid: Risk Indicators & Triage Recommendation */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+      {/* Main Grid: Request Text & Triage Rule Evidence */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         
-        {/* Detected Risk Indicators */}
-        <div className="bg-white border border-sky-100 rounded-2xl p-6 shadow-xs space-y-4">
-          <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-            <h3 className="text-sm font-bold text-slate-900 flex items-center gap-2">
-              <ShieldAlert className="w-4 h-4 text-rose-600" />
-              Detected Risk Indicators
-            </h3>
-            <span className="text-xs bg-slate-100 text-slate-700 px-2.5 py-0.5 rounded-full font-mono font-bold">
-              {caseData.risk_indicators?.length || 0} Found
-            </span>
+        {/* Left Column: Patient Request Content */}
+        <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-xs space-y-4">
+          <div className="flex items-center space-x-2 text-slate-800 font-bold text-sm">
+            <FileText className="w-4 h-4 text-sky-600" />
+            <span>Patient Request Message</span>
+          </div>
+          <div className="p-4 bg-slate-50 rounded-xl text-slate-800 text-sm leading-relaxed border border-slate-200/60 whitespace-pre-wrap font-sans">
+            "{caseData.message}"
           </div>
 
-          <div className="space-y-3">
+          <div className="pt-2 border-t border-slate-100 flex items-center justify-between text-xs text-slate-500">
+            <span>Contact Channel: <strong>{caseData.contact_method}</strong></span>
+            <span>Recorded Queue Time: <strong>{caseData.waiting_time_minutes}m</strong></span>
+          </div>
+
+          {/* If Resolved, show resolution details banner */}
+          {caseData.status === 'Resolved' && (
+            <div className="bg-emerald-50 border border-emerald-200 p-4 rounded-xl space-y-1">
+              <div className="flex items-center space-x-2 text-emerald-800 font-bold text-xs uppercase tracking-wider">
+                <CheckCircle className="w-4 h-4 text-emerald-600" />
+                <span>Case Resolved & Closed</span>
+              </div>
+              <p className="text-xs text-slate-700">
+                <strong>Disposition:</strong> {caseData.resolution_disposition}
+              </p>
+              {caseData.resolution_notes && (
+                <p className="text-xs text-slate-600">
+                  <strong>Notes:</strong> {caseData.resolution_notes}
+                </p>
+              )}
+              <p className="text-[11px] text-slate-500 pt-1">
+                Resolved by <strong>{caseData.resolved_by}</strong> on {caseData.resolved_at ? new Date(caseData.resolved_at).toLocaleString() : 'N/A'}
+              </p>
+            </div>
+          )}
+        </div>
+
+        {/* Right Column: Transparent Triage Engine Scoring & Evidence */}
+        <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-xs space-y-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center space-x-2 text-slate-800 font-bold text-sm">
+              <ShieldAlert className="w-4 h-4 text-rose-600" />
+              <span>Transparent Triage Scoring</span>
+            </div>
+            <div className="flex items-center space-x-2">
+              <span className="text-xs text-slate-500 font-medium">Risk Score:</span>
+              <span className={`text-base font-extrabold px-2.5 py-0.5 rounded-lg font-mono ${
+                caseData.risk_score >= 6 ? 'bg-rose-100 text-rose-800' :
+                caseData.risk_score >= 3 ? 'bg-amber-100 text-amber-800' :
+                'bg-emerald-100 text-emerald-800'
+              }`}>
+                +{caseData.risk_score}
+              </span>
+            </div>
+          </div>
+
+          <p className="text-xs text-slate-600">
+            Trigger phrases and operational conditions detected by the Python rule engine:
+          </p>
+
+          <div className="space-y-2.5">
             {caseData.risk_indicators && caseData.risk_indicators.length > 0 ? (
               caseData.risk_indicators.map((ind, idx) => (
-                <div key={idx} className="bg-slate-50 p-4 rounded-xl border border-slate-200 space-y-2">
-                  <div className="flex items-center justify-between">
-                    <span className="font-bold text-slate-900 text-sm">{ind.name}</span>
-                    <span className={`text-xs font-mono font-bold px-2 py-0.5 rounded ${
-                      ind.severity === 'HIGH' ? 'bg-rose-100 text-rose-800' :
-                      ind.severity === 'MEDIUM' ? 'bg-amber-100 text-amber-800' : 'bg-emerald-100 text-emerald-800'
-                    }`}>
-                      +{ind.score} ({ind.severity})
-                    </span>
+                <div 
+                  key={idx} 
+                  className={`p-3 rounded-xl border text-xs flex items-start justify-between gap-3 ${
+                    ind.severity === 'HIGH' ? 'bg-rose-50/70 border-rose-200' :
+                    ind.severity === 'MEDIUM' ? 'bg-amber-50/70 border-amber-200' :
+                    'bg-slate-50 border-slate-200'
+                  }`}
+                >
+                  <div>
+                    <div className="font-bold text-slate-900 flex items-center gap-1.5">
+                      <span className={`w-2 h-2 rounded-full ${
+                        ind.severity === 'HIGH' ? 'bg-rose-600' :
+                        ind.severity === 'MEDIUM' ? 'bg-amber-500' :
+                        'bg-sky-500'
+                      }`}></span>
+                      {ind.name}
+                    </div>
+                    <div className="text-slate-600 mt-0.5 text-[11px]">
+                      {ind.evidence}
+                    </div>
                   </div>
-                  {caseData.evidence && caseData.evidence[idx] && (
-                    <p className="text-xs text-slate-600 leading-relaxed border-t border-slate-200 pt-2 mt-1">
-                      <strong>Evidence:</strong> {caseData.evidence[idx].evidence}
-                    </p>
-                  )}
+                  <div className="font-mono font-bold text-slate-800 bg-white/80 px-2 py-0.5 rounded border border-slate-200">
+                    +{ind.score}
+                  </div>
                 </div>
               ))
             ) : (
-              <div className="text-xs text-slate-500 p-4 text-center">
-                No specific risk keywords detected. Routine follow-up score assigned.
+              <div className="p-4 bg-emerald-50 border border-emerald-200 rounded-xl text-xs text-emerald-800 flex items-center gap-2">
+                <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                <span>No high-risk keywords detected. Standard routine inquiry scoring applied (Score 0 - LOW Priority).</span>
               </div>
             )}
           </div>
         </div>
 
-        {/* System Triage Recommendation */}
-        <div className="bg-white border border-sky-100 rounded-2xl p-6 shadow-xs space-y-4 flex flex-col justify-between">
-          <div>
-            <div className="border-b border-slate-100 pb-3 mb-4">
-              <h3 className="text-sm font-bold text-slate-900">
-                System Triage Recommendation
-              </h3>
-              <p className="text-xs text-slate-500">Automated prototype rule calculation</p>
-            </div>
-
-            <div className="bg-sky-50/60 p-5 rounded-xl border border-sky-100 space-y-4 text-center">
-              <div className="flex items-center justify-center gap-6">
-                <div>
-                  <span className="text-xs text-slate-500 block uppercase font-mono font-semibold">Risk Score</span>
-                  <span className="text-4xl font-extrabold text-sky-700 font-mono">
-                    {caseData.risk_score}
-                  </span>
-                </div>
-                <div className="h-10 w-px bg-sky-200" />
-                <div>
-                  <span className="text-xs text-slate-500 block uppercase font-mono font-semibold">Preliminary Priority</span>
-                  <div className="mt-1">
-                    <PriorityBadge priority={caseData.system_priority} />
-                  </div>
-                </div>
-              </div>
-
-              <p className="text-xs text-slate-600 leading-relaxed pt-2 border-t border-sky-100">
-                The recommendation is based on detected prototype risk indicators and waiting time ({caseData.waiting_time_minutes} min).
-              </p>
-            </div>
-          </div>
-
-          <div className="bg-amber-50 p-3.5 rounded-xl border border-amber-200 text-xs text-amber-800 flex items-center gap-2 font-medium">
-            <AlertTriangle className="w-4 h-4 flex-shrink-0 text-amber-600" />
-            <span>Prototype recommendation — human staff review required</span>
-          </div>
-        </div>
-
       </div>
 
-      {/* Section 2: Human Review Panel */}
-      <div className="bg-white border border-sky-200 rounded-2xl p-6 shadow-sm space-y-6">
-        
-        <div className="flex items-center justify-between border-b border-slate-100 pb-4">
-          <div className="flex items-center gap-2 text-base font-bold text-slate-900">
-            <UserCheck className="w-5 h-5 text-sky-600" />
-            <span>HUMAN REVIEW PANEL</span>
+      {/* Clinical Operations Panels */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+
+        {/* Panel 1: Human Clinical Review & Override */}
+        <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-xs space-y-4">
+          <div className="flex items-center space-x-2 text-slate-800 font-bold text-sm">
+            <UserCheck className="w-4 h-4 text-sky-600" />
+            <span>Human-in-the-Loop Review</span>
           </div>
-          {latestReview && (
-            <span className="text-xs text-emerald-800 bg-emerald-50 border border-emerald-200 px-3 py-1 rounded-full font-bold">
-              Reviewed by {latestReview.reviewer}
-            </span>
+          <p className="text-xs text-slate-600">
+            Confirm the rule recommendation or override to another priority based on clinical judgment.
+          </p>
+
+          {reviewMessage && (
+            <div className="bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs p-3 rounded-xl flex items-center gap-2">
+              <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+              <span>{reviewMessage}</span>
+            </div>
           )}
-        </div>
 
-        {reviewMessage && (
-          <div className="bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs p-3.5 rounded-xl flex items-center gap-2 font-medium">
-            <CheckCircle2 className="w-4 h-4 text-emerald-600 flex-shrink-0" />
-            <span>{reviewMessage}</span>
-          </div>
-        )}
-
-        {latestReview ? (
-          /* Reviewed Display State */
-          <div className="bg-slate-50 p-5 rounded-xl border border-slate-200 space-y-3 text-xs">
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 pb-3 border-b border-slate-200">
-              <div>
-                <span className="text-slate-500 block font-medium">System Priority</span>
-                <PriorityBadge priority={latestReview.system_priority} size="small" />
-              </div>
-              <div>
-                <span className="text-slate-500 block font-medium">Final Priority (Human)</span>
-                <PriorityBadge priority={latestReview.final_priority} size="small" />
-              </div>
-              <div>
-                <span className="text-slate-500 block font-medium">Reviewed By</span>
-                <span className="font-bold text-slate-900">{latestReview.reviewer}</span>
-              </div>
-              <div>
-                <span className="text-slate-500 block font-medium">Reviewed Timestamp</span>
-                <span className="text-slate-700">{new Date(latestReview.reviewed_at).toLocaleString()}</span>
-              </div>
-            </div>
-            <div>
-              <span className="text-slate-500 block mb-1 font-medium">Reviewer Note:</span>
-              <p className="text-slate-800 italic bg-white p-3 rounded-lg border border-slate-200">
-                "{latestReview.reviewer_note || 'No additional note provided.'}"
-              </p>
-            </div>
-          </div>
-        ) : (
-          /* Interactive Review Form */
-          <form onSubmit={handleReviewSubmit} className="space-y-5">
+          <form onSubmit={handleReviewSubmit} className="space-y-4 text-xs">
             
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              
-              {/* Review Decision Buttons */}
-              <div className="space-y-2">
-                <label className="block text-xs font-bold text-slate-800">
-                  Reviewer Decision
-                </label>
-                <div className="flex gap-3">
-                  <button
-                    type="button"
-                    onClick={() => setReviewMode('confirm')}
-                    className={`flex-1 py-2.5 px-3 rounded-xl text-xs font-bold border transition-all ${
-                      reviewMode === 'confirm'
-                        ? 'bg-emerald-50 text-emerald-800 border-emerald-300 shadow-2xs'
-                        : 'bg-slate-50 text-slate-600 border-slate-200'
-                    }`}
-                  >
-                    Confirm Priority ({caseData.system_priority})
-                  </button>
+            {/* Mode selection: Confirm vs Override */}
+            <div className="grid grid-cols-2 gap-3">
+              <button
+                type="button"
+                onClick={() => setReviewMode('confirm')}
+                className={`py-2 px-3 rounded-xl font-bold border transition-all text-center ${
+                  reviewMode === 'confirm'
+                    ? 'bg-sky-50 border-sky-500 text-sky-700 shadow-xs'
+                    : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
+                }`}
+              >
+                Confirm Priority ({caseData.system_priority})
+              </button>
 
-                  <button
-                    type="button"
-                    onClick={() => setReviewMode('override')}
-                    className={`flex-1 py-2.5 px-3 rounded-xl text-xs font-bold border transition-all ${
-                      reviewMode === 'override'
-                        ? 'bg-amber-50 text-amber-800 border-amber-300 shadow-2xs'
-                        : 'bg-slate-50 text-slate-600 border-slate-200'
-                    }`}
-                  >
-                    Override Priority
-                  </button>
-                </div>
-              </div>
-
-              {/* Priority Selector (If override) */}
-              {reviewMode === 'override' && (
-                <div className="space-y-2">
-                  <label className="block text-xs font-bold text-slate-800">
-                    Select Overridden Priority
-                  </label>
-                  <div className="flex gap-2">
-                    {['LOW', 'MEDIUM', 'HIGH'].map((p) => (
-                      <button
-                        type="button"
-                        key={p}
-                        onClick={() => setOverridePriority(p)}
-                        className={`flex-1 py-2.5 px-3 rounded-xl text-xs font-bold border transition-all ${
-                          overridePriority === p
-                            ? p === 'HIGH' ? 'bg-rose-600 text-white border-rose-500'
-                            : p === 'MEDIUM' ? 'bg-amber-600 text-white border-amber-500'
-                            : 'bg-emerald-600 text-white border-emerald-500'
-                            : 'bg-slate-50 text-slate-600 border-slate-200'
-                        }`}
-                      >
-                        {p}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              )}
-
+              <button
+                type="button"
+                onClick={() => setReviewMode('override')}
+                className={`py-2 px-3 rounded-xl font-bold border transition-all text-center ${
+                  reviewMode === 'override'
+                    ? 'bg-amber-50 border-amber-500 text-amber-800 shadow-xs'
+                    : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
+                }`}
+              >
+                Override Priority
+              </button>
             </div>
 
-            {/* Reviewer Meta Inputs */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div>
-                <label className="block text-xs font-bold text-slate-800 mb-1">
-                  Reviewer Name
-                </label>
-                <input
-                  type="text"
-                  value={reviewerName}
-                  onChange={(e) => setReviewerName(e.target.value)}
-                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-xs text-slate-900 focus:outline-none focus:border-sky-500 focus:bg-white"
-                  required
-                />
+            {/* Override Priority Select */}
+            {reviewMode === 'override' && (
+              <div className="p-3 bg-amber-50/50 border border-amber-200 rounded-xl space-y-2">
+                <label className="font-bold text-amber-900 block">Select Overridden Priority:</label>
+                <div className="flex gap-2">
+                  {['LOW', 'MEDIUM', 'HIGH'].map((p) => (
+                    <button
+                      type="button"
+                      key={p}
+                      onClick={() => setOverridePriority(p)}
+                      className={`flex-1 py-1.5 rounded-lg font-bold transition-all ${
+                        overridePriority === p
+                          ? p === 'HIGH' ? 'bg-rose-600 text-white' : p === 'MEDIUM' ? 'bg-amber-500 text-white' : 'bg-emerald-600 text-white'
+                          : 'bg-white text-slate-700 border border-slate-200'
+                      }`}
+                    >
+                      {p}
+                    </button>
+                  ))}
+                </div>
               </div>
+            )}
 
-              <div>
-                <label className="block text-xs font-bold text-slate-800 mb-1">
-                  Reviewer Note
-                </label>
-                <input
-                  type="text"
-                  value={reviewerNote}
-                  onChange={(e) => setReviewerNote(e.target.value)}
-                  placeholder="E.g., Priority confirmed after direct telephone contact."
-                  className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-xs text-slate-900 focus:outline-none focus:border-sky-500 focus:bg-white"
-                />
-              </div>
+            {/* Reviewer Name */}
+            <div className="space-y-1">
+              <label className="font-bold text-slate-700 block">Reviewer Name / ID</label>
+              <input
+                type="text"
+                value={reviewerName}
+                onChange={(e) => setReviewerName(e.target.value)}
+                required
+                className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-sky-500 focus:bg-white"
+                placeholder="e.g. Dr. Sarah Jenkins, LCSW"
+              />
+            </div>
+
+            {/* Reviewer Clinical Note */}
+            <div className="space-y-1">
+              <label className="font-bold text-slate-700 block">Clinical Rationale / Reviewer Note</label>
+              <textarea
+                value={reviewerNote}
+                onChange={(e) => setReviewerNote(e.target.value)}
+                rows={2}
+                className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-sky-500 focus:bg-white"
+                placeholder="Enter justification for priority decision..."
+              />
             </div>
 
             <button
               type="submit"
               disabled={submittingReview}
-              className="py-3 px-6 bg-sky-600 hover:bg-sky-500 text-white text-xs font-bold rounded-xl transition-all shadow-md shadow-sky-600/20 flex items-center justify-center space-x-2"
+              className="w-full py-2.5 bg-sky-600 hover:bg-sky-500 text-white font-bold rounded-xl transition-all shadow-md shadow-sky-600/20 disabled:opacity-50"
             >
-              <CheckSquare className="w-4 h-4" />
-              <span>{submittingReview ? 'Submitting Review...' : 'Confirm & Save Human Review'}</span>
+              {submittingReview ? 'Recording Review...' : 'Record Human Review Decision'}
             </button>
-
           </form>
-        )}
-
-      </div>
-
-      {/* Section 3: Staff Assignment & Follow-Up Panel */}
-      <div className="bg-white border border-sky-100 rounded-2xl p-6 shadow-xs space-y-6">
-        
-        <div className="flex items-center justify-between border-b border-slate-100 pb-4">
-          <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
-            <User className="w-5 h-5 text-sky-600" />
-            <span>Staff Assignment & Follow-up</span>
-          </h3>
-          {caseData.assigned_to && (
-            <span className="text-xs text-slate-700 bg-slate-100 border border-slate-200 px-3 py-1 rounded-full font-bold">
-              Assigned: {caseData.assigned_to}
-            </span>
-          )}
         </div>
 
-        {assignMessage && (
-          <div className="bg-sky-50 border border-sky-200 text-sky-800 text-xs p-3.5 rounded-xl flex items-center gap-2 font-medium">
-            <CheckCircle2 className="w-4 h-4 text-sky-600 flex-shrink-0" />
-            <span>{assignMessage}</span>
+        {/* Panel 2: Staff Assignment & Follow-up Scheduling */}
+        <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-xs space-y-4">
+          <div className="flex items-center space-x-2 text-slate-800 font-bold text-sm">
+            <Calendar className="w-4 h-4 text-sky-600" />
+            <span>Staff Assignment & Follow-up</span>
           </div>
-        )}
+          <p className="text-xs text-slate-600">
+            Assign responsibility to a clinical care coordinator and schedule target callback time.
+          </p>
 
-        {latestFollowup ? (
-          /* Existing Followup Display */
-          <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 text-xs space-y-2">
-            <div className="flex items-center justify-between">
-              <div>
-                <span className="text-slate-500 block font-medium">Assigned Clinician:</span>
-                <span className="font-bold text-slate-900 text-sm">{latestFollowup.assigned_to}</span>
-              </div>
-              <div className="text-right">
-                <span className="text-slate-500 block font-medium">Follow-up Due:</span>
-                <span className="font-bold text-amber-700">{latestFollowup.due_time}</span>
-              </div>
+          {assignMessage && (
+            <div className="bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs p-3 rounded-xl flex items-center gap-2">
+              <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+              <span>{assignMessage}</span>
             </div>
-            {latestFollowup.notes && (
-              <p className="text-slate-700 pt-2 border-t border-slate-200">
-                <strong>Notes:</strong> {latestFollowup.notes}
-              </p>
-            )}
-          </div>
-        ) : null}
+          )}
 
-        {/* Assignment Form */}
-        <form onSubmit={handleAssignmentSubmit} className="space-y-4">
-          
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <form onSubmit={handleAssignmentSubmit} className="space-y-4 text-xs">
             
-            <div>
-              <label className="block text-xs font-bold text-slate-800 mb-1">
-                Assign Staff Member
-              </label>
+            {/* Assignee Selection */}
+            <div className="space-y-1">
+              <label className="font-bold text-slate-700 block">Assign To Clinician / Team</label>
               <select
                 value={assignedStaff}
                 onChange={(e) => setAssignedStaff(e.target.value)}
-                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-xs text-slate-900 focus:outline-none focus:border-sky-500 focus:bg-white font-medium"
+                className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-sky-500 focus:bg-white"
               >
-                <option value="Staff A">Staff A (Psychiatric Nurse Coordinator)</option>
-                <option value="Staff B">Staff B (Clinical Social Worker)</option>
-                <option value="Staff C">Staff C (Outpatient Counsellor)</option>
+                <option value="Staff A (Psychiatric Nurse)">Staff A (Psychiatric Nurse)</option>
+                <option value="Staff B (Clinical Social Worker)">Staff B (Clinical Social Worker)</option>
+                <option value="Staff C (Outpatient Counsellor)">Staff C (Outpatient Counsellor)</option>
+                <option value="Crisis Response Team">Crisis Response Team</option>
               </select>
             </div>
 
-            <div>
-              <label className="block text-xs font-bold text-slate-800 mb-1">
-                Follow-up Due Time
-              </label>
+            {/* Due Time */}
+            <div className="space-y-1">
+              <label className="font-bold text-slate-700 block">Follow-up Target Due Time</label>
               <input
                 type="text"
                 value={dueTime}
                 onChange={(e) => setDueTime(e.target.value)}
-                placeholder="E.g., Today, 3:30 PM"
-                className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-xs text-slate-900 focus:outline-none focus:border-sky-500 focus:bg-white font-medium"
                 required
+                className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-sky-500 focus:bg-white"
+                placeholder="e.g. Today, 3:30 PM or Within 15 minutes"
               />
             </div>
 
-          </div>
+            {/* Assignment Notes */}
+            <div className="space-y-1">
+              <label className="font-bold text-slate-700 block">Instructions & Notes</label>
+              <textarea
+                value={assignmentNotes}
+                onChange={(e) => setAssignmentNotes(e.target.value)}
+                rows={2}
+                className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-sky-500 focus:bg-white"
+                placeholder="Specific instructions for assigned clinician..."
+              />
+            </div>
 
-          <div>
-            <label className="block text-xs font-bold text-slate-800 mb-1">
-              Assignment Notes / Instructions
+            <button
+              type="submit"
+              disabled={submittingAssignment}
+              className="w-full py-2.5 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-xl transition-all shadow-md shadow-slate-900/10 disabled:opacity-50"
+            >
+              {submittingAssignment ? 'Assigning...' : 'Assign Staff & Schedule Follow-up'}
+            </button>
+          </form>
+        </div>
+
+      </div>
+
+      {/* Advanced Panels: Patient Communication Simulation & Case Resolution */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+
+        {/* Panel 3: Simulated Patient Communication (SMS / Email) */}
+        <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-xs space-y-4">
+          <div className="flex items-center space-x-2 text-slate-800 font-bold text-sm">
+            <MessageSquare className="w-4 h-4 text-indigo-600" />
+            <span>Simulated Patient Communication</span>
+          </div>
+          <p className="text-xs text-slate-600">
+            Simulate automated or manual SMS/Email messages sent directly to the patient's contact channel.
+          </p>
+
+          {notifSuccessMessage && (
+            <div className="bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs p-3 rounded-xl flex items-center gap-2">
+              <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+              <span>{notifSuccessMessage}</span>
+            </div>
+          )}
+
+          {/* Quick Template Chips */}
+          <div className="space-y-1.5">
+            <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block">
+              Quick Response Templates
             </label>
-            <input
-              type="text"
-              value={assignmentNotes}
-              onChange={(e) => setAssignmentNotes(e.target.value)}
-              placeholder="E.g., Conduct urgent telephone risk assessment."
-              className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2.5 text-xs text-slate-900 focus:outline-none focus:border-sky-500 focus:bg-white font-medium"
-            />
+            <div className="flex flex-wrap gap-1.5">
+              {['Safety Check-in', 'Clinician Assigned', 'Appointment Scheduled', 'Crisis Resources'].map((t) => (
+                <button
+                  type="button"
+                  key={t}
+                  onClick={() => applyTemplate(t)}
+                  className={`px-2.5 py-1 text-xs rounded-lg font-semibold transition-all ${
+                    notifTemplate === t
+                      ? 'bg-indigo-600 text-white shadow-2xs'
+                      : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
+                  }`}
+                >
+                  {t}
+                </button>
+              ))}
+            </div>
           </div>
 
-          <button
-            type="submit"
-            disabled={submittingAssignment}
-            className="py-2.5 px-5 bg-slate-800 hover:bg-slate-700 text-white text-xs font-bold rounded-xl border border-slate-700 transition-all flex items-center space-x-2"
-          >
-            <Calendar className="w-4 h-4 text-sky-400" />
-            <span>{submittingAssignment ? 'Saving Assignment...' : 'Assign Staff & Set Follow-up'}</span>
-          </button>
+          <form onSubmit={handleSendNotification} className="space-y-3 text-xs">
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <label className="font-bold text-slate-700 block mb-1">Channel</label>
+                <select
+                  value={notifChannel}
+                  onChange={(e) => setNotifChannel(e.target.value)}
+                  className="w-full p-2 bg-slate-50 border border-slate-200 rounded-xl"
+                >
+                  <option value="SMS">SMS Text Message</option>
+                  <option value="Email">Secure Email</option>
+                  <option value="In-App">Patient Portal Notification</option>
+                </select>
+              </div>
 
-        </form>
+              <div>
+                <label className="font-bold text-slate-700 block mb-1">Recipient</label>
+                <input
+                  type="text"
+                  value={notifRecipient}
+                  onChange={(e) => setNotifRecipient(e.target.value)}
+                  required
+                  className="w-full p-2 bg-slate-50 border border-slate-200 rounded-xl"
+                />
+              </div>
+            </div>
 
+            <div>
+              <label className="font-bold text-slate-700 block mb-1">Message Content</label>
+              <textarea
+                value={notifBody}
+                onChange={(e) => setNotifBody(e.target.value)}
+                rows={3}
+                required
+                className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl"
+              />
+            </div>
+
+            <button
+              type="submit"
+              disabled={submittingNotif}
+              className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white font-bold rounded-xl transition-all shadow-md shadow-indigo-600/20 disabled:opacity-50 flex items-center justify-center space-x-2"
+            >
+              <Send className="w-3.5 h-3.5" />
+              <span>{submittingNotif ? 'Dispatching Message...' : 'Send Simulated Communication'}</span>
+            </button>
+          </form>
+
+          {/* Sent Notifications Log */}
+          {caseData.notifications && caseData.notifications.length > 0 && (
+            <div className="pt-3 border-t border-slate-100 space-y-2">
+              <span className="text-[11px] font-bold text-slate-500 uppercase tracking-wider block">
+                Dispatched Communications Log ({caseData.notifications.length})
+              </span>
+              <div className="space-y-1.5 max-h-36 overflow-y-auto pr-1 text-xs">
+                {caseData.notifications.map((n) => (
+                  <div key={n.id} className="p-2.5 bg-slate-50 rounded-xl border border-slate-200 flex items-start justify-between gap-2">
+                    <div>
+                      <div className="flex items-center gap-1.5">
+                        <span className="font-bold text-slate-900">{n.channel}</span>
+                        <span className="text-slate-400">•</span>
+                        <span className="text-slate-600 font-medium">{n.template_type}</span>
+                        <span className="text-[10px] bg-emerald-100 text-emerald-800 font-bold px-1.5 py-0.2 rounded">
+                          {n.status}
+                        </span>
+                      </div>
+                      <p className="text-slate-600 text-[11px] mt-0.5 line-clamp-1">{n.message_body}</p>
+                    </div>
+                    <span className="text-[10px] text-slate-400 whitespace-nowrap">
+                      {new Date(n.sent_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Panel 4: Case Resolution & Close Workflow */}
+        <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-xs space-y-4">
+          <div className="flex items-center space-x-2 text-slate-800 font-bold text-sm">
+            <CheckCircle className="w-4 h-4 text-emerald-600" />
+            <span>Case Resolution & Closure</span>
+          </div>
+          <p className="text-xs text-slate-600">
+            Once patient safety and care coordination goals are fulfilled, finalize and close the case record.
+          </p>
+
+          {resolutionMessage && (
+            <div className="bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs p-3 rounded-xl flex items-center gap-2">
+              <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+              <span>{resolutionMessage}</span>
+            </div>
+          )}
+
+          <form onSubmit={handleResolveSubmit} className="space-y-4 text-xs">
+            <div className="space-y-1">
+              <label className="font-bold text-slate-700 block">Resolution Disposition</label>
+              <select
+                value={resolutionDisposition}
+                onChange={(e) => setResolutionDisposition(e.target.value)}
+                className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl"
+              >
+                <option value="Follow-up Call Completed">Follow-up Call Completed</option>
+                <option value="Safety Plan Formed">Safety Plan Formed & Verified</option>
+                <option value="Outpatient Appointment Scheduled">Outpatient Appointment Scheduled</option>
+                <option value="Referred to Acute Crisis Team">Referred to Acute Crisis Team</option>
+                <option value="Administrative Query Solved">Administrative Query Solved</option>
+              </select>
+            </div>
+
+            <div className="space-y-1">
+              <label className="font-bold text-slate-700 block">Closing Clinician Name</label>
+              <input
+                type="text"
+                value={resolvedByName}
+                onChange={(e) => setResolvedByName(e.target.value)}
+                required
+                className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl"
+                placeholder="e.g. Dr. Sarah Jenkins, LCSW"
+              />
+            </div>
+
+            <div className="space-y-1">
+              <label className="font-bold text-slate-700 block">Resolution Summary Notes</label>
+              <textarea
+                value={resolutionNotes}
+                onChange={(e) => setResolutionNotes(e.target.value)}
+                rows={2}
+                className="w-full p-2.5 bg-slate-50 border border-slate-200 rounded-xl"
+                placeholder="Details of care plan delivered or patient disposition..."
+              />
+            </div>
+
+            <button
+              type="submit"
+              disabled={submittingResolution || caseData.status === 'Resolved'}
+              className={`w-full py-2.5 font-bold rounded-xl transition-all shadow-md ${
+                caseData.status === 'Resolved'
+                  ? 'bg-slate-200 text-slate-500 cursor-not-allowed'
+                  : 'bg-emerald-600 hover:bg-emerald-500 text-white shadow-emerald-600/20'
+              }`}
+            >
+              {caseData.status === 'Resolved' ? '✓ Case Already Resolved' : submittingResolution ? 'Resolving Case...' : 'Mark Case as Resolved & Closed'}
+            </button>
+          </form>
+        </div>
+
+      </div>
+
+      {/* Comprehensive Audit Trail & Chronological Timeline */}
+      <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-xs space-y-4">
+        <div className="flex items-center space-x-2 text-slate-800 font-bold text-sm">
+          <History className="w-4 h-4 text-sky-600" />
+          <span>Case Timeline & Compliance Audit Trail</span>
+        </div>
+        <p className="text-xs text-slate-600">
+          Immutable event log tracking all system detections, human clinician reviews, assignments, communications, and dispositions.
+        </p>
+
+        <div className="space-y-3 pt-2">
+          {caseData.audit_logs && caseData.audit_logs.length > 0 ? (
+            caseData.audit_logs.map((log) => (
+              <div key={log.id} className="flex items-start space-x-3 text-xs">
+                <div className="w-2.5 h-2.5 rounded-full bg-sky-500 mt-1.5 shrink-0"></div>
+                <div className="flex-1 bg-slate-50 p-3 rounded-xl border border-slate-200/80">
+                  <div className="flex items-center justify-between font-bold text-slate-900 mb-1">
+                    <span className="font-mono text-sky-700">{log.action}</span>
+                    <span className="text-[11px] text-slate-400 font-normal">
+                      {new Date(log.timestamp).toLocaleString()}
+                    </span>
+                  </div>
+                  <p className="text-slate-700 text-xs">{log.details}</p>
+                  <p className="text-[10px] text-slate-400 mt-1">Performed by: <strong>{log.performed_by}</strong></p>
+                </div>
+              </div>
+            ))
+          ) : (
+            <p className="text-xs text-slate-400 italic">No historical audit entries found.</p>
+          )}
+        </div>
       </div>
 
     </div>

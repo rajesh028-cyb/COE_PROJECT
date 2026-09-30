@@ -6,7 +6,7 @@ from datetime import datetime, timedelta
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 from app.database import engine, Base, SessionLocal
-from app.models import Case, Review, Followup
+from app.models import Case, Review, Followup, NotificationLog, AuditLog
 from app.services.triage_engine import evaluate_triage
 
 def seed_database():
@@ -161,10 +161,13 @@ def seed_database():
             "message": "Just checking in to say my community support group meeting went well today.",
             "contact_method": "Email",
             "waiting_time_minutes": 5,
-            "status": "Completed",
+            "status": "Resolved",
             "reviewer": "Staff C",
             "reviewer_note": "Positive check-in. Archived.",
             "assigned_to": "Staff C",
+            "resolution_disposition": "Follow-up Completed",
+            "resolution_notes": "Patient attended peer group; confirmed stable mood and established routine.",
+            "resolved_by": "Staff C",
             "hours_ago": 24
         },
         {
@@ -183,10 +186,13 @@ def seed_database():
             "message": "I need to update my home mailing address in the hospital system.",
             "contact_method": "Portal",
             "waiting_time_minutes": 22,
-            "status": "Completed",
+            "status": "Resolved",
             "reviewer": "Staff A",
             "reviewer_note": "Address updated in portal.",
             "assigned_to": "Staff A",
+            "resolution_disposition": "Administrative Query Solved",
+            "resolution_notes": "Updated physical mailing address and verified contact numbers.",
+            "resolved_by": "Staff A",
             "hours_ago": 30
         },
 
@@ -236,6 +242,8 @@ def seed_database():
 
         created_time = now - timedelta(hours=item.get("hours_ago", 1))
 
+        resolved_time = created_time + timedelta(hours=2) if item.get("resolution_disposition") else None
+
         case_obj = Case(
             case_id=item["case_id"],
             request_type=item["request_type"],
@@ -248,33 +256,90 @@ def seed_database():
             evidence=triage["evidence"],
             status=item["status"],
             assigned_to=item.get("assigned_to"),
+            resolution_disposition=item.get("resolution_disposition"),
+            resolution_notes=item.get("resolution_notes"),
+            resolved_by=item.get("resolved_by"),
+            resolved_at=resolved_time,
             created_at=created_time
         )
         db.add(case_obj)
 
+        # Add initial audit log
+        audit_init = AuditLog(
+            case_id=item["case_id"],
+            action="CASE_INTAKE",
+            performed_by="System Triage Engine",
+            details=f"Intake registered with calculated risk score {triage['risk_score']} ({triage['priority']} priority)",
+            timestamp=created_time
+        )
+        db.add(audit_init)
+
         # Seed review if status is beyond pending
         if "reviewer" in item:
+            rev_time = created_time + timedelta(minutes=15)
             review_obj = Review(
                 case_id=item["case_id"],
                 system_priority=triage["priority"],
                 final_priority=triage["priority"],
                 reviewer=item["reviewer"],
                 reviewer_note=item.get("reviewer_note", "Human review confirmed system triage recommendation."),
-                reviewed_at=created_time + timedelta(minutes=15)
+                reviewed_at=rev_time
             )
             db.add(review_obj)
 
+            audit_rev = AuditLog(
+                case_id=item["case_id"],
+                action="PRIORITY_REVIEWED",
+                performed_by=item["reviewer"],
+                details=f"Confirmed priority {triage['priority']}. {item.get('reviewer_note', '')}",
+                timestamp=rev_time
+            )
+            db.add(audit_rev)
+
         # Seed followup if status is Follow-up Pending
         if item.get("due_time"):
+            assign_time = created_time + timedelta(minutes=20)
             followup_obj = Followup(
                 case_id=item["case_id"],
                 assigned_to=item["assigned_to"],
                 due_time=item["due_time"],
                 status="Follow-up Pending",
                 notes="Assigned via staff dashboard.",
-                created_at=created_time + timedelta(minutes=20)
+                created_at=assign_time
             )
             db.add(followup_obj)
+
+            audit_assign = AuditLog(
+                case_id=item["case_id"],
+                action="STAFF_ASSIGNED",
+                performed_by="Clinical Coordinator",
+                details=f"Assigned to {item['assigned_to']} with target due time: {item['due_time']}",
+                timestamp=assign_time
+            )
+            db.add(audit_assign)
+
+            # Sample automated patient SMS notification
+            notif = NotificationLog(
+                case_id=item["case_id"],
+                channel="SMS",
+                recipient="+1 (555) 019-2834",
+                template_type="Clinician Assigned",
+                message_body=f"Hello, your hospital support request ({item['case_id']}) has been assigned to {item['assigned_to']}. Expected follow-up: {item['due_time']}.",
+                status="Delivered",
+                sent_by="Clinical Dispatch",
+                sent_at=assign_time + timedelta(minutes=1)
+            )
+            db.add(notif)
+
+        if item.get("resolution_disposition"):
+            audit_res = AuditLog(
+                case_id=item["case_id"],
+                action="CASE_RESOLVED",
+                performed_by=item["resolved_by"],
+                details=f"Case closed with disposition: '{item['resolution_disposition']}'. Notes: {item.get('resolution_notes', '')}",
+                timestamp=resolved_time
+            )
+            db.add(audit_res)
 
     db.commit()
     db.close()

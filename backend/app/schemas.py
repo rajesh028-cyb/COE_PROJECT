@@ -23,6 +23,18 @@ class CaseAssignCreate(BaseModel):
     due_time: str = Field(..., description="Target due time e.g., 'Today, 3:30 PM'")
     notes: Optional[str] = ""
 
+class CaseResolveCreate(BaseModel):
+    disposition: str = Field(..., description="Resolution category e.g., 'Follow-up Completed', 'Safety Plan Formed', 'Referred to Crisis Team'")
+    notes: Optional[str] = Field(default="", description="Clinical closing notes")
+    resolved_by: str = Field(default="Staff Clinician", description="Name/Role of staff closing the case")
+
+class CaseNotifyCreate(BaseModel):
+    channel: str = Field(default="SMS", description="SMS, Email, or In-App")
+    recipient: str = Field(..., description="Phone number or email address")
+    template_type: str = Field(..., description="Template title e.g., 'Safety Check-in', 'Appointment Confirmation', 'Crisis Resources'")
+    message_body: str = Field(..., description="Content of the communication")
+    sent_by: str = Field(default="Clinical Dispatch", description="Staff sender name")
+
 class ReviewOut(BaseModel):
     id: int
     case_id: str
@@ -46,6 +58,29 @@ class FollowupOut(BaseModel):
 
     model_config = {"from_attributes": True}
 
+class NotificationLogOut(BaseModel):
+    id: int
+    case_id: str
+    channel: str
+    recipient: str
+    template_type: str
+    message_body: str
+    status: str
+    sent_by: str
+    sent_at: datetime
+
+    model_config = {"from_attributes": True}
+
+class AuditLogOut(BaseModel):
+    id: int
+    case_id: str
+    action: str
+    performed_by: str
+    details: Optional[str]
+    timestamp: datetime
+
+    model_config = {"from_attributes": True}
+
 class CaseOut(BaseModel):
     id: int
     case_id: str
@@ -57,6 +92,10 @@ class CaseOut(BaseModel):
     system_priority: str
     status: str
     assigned_to: Optional[str]
+    resolution_disposition: Optional[str] = None
+    resolution_notes: Optional[str] = None
+    resolved_by: Optional[str] = None
+    resolved_at: Optional[datetime] = None
     created_at: datetime
 
     model_config = {"from_attributes": True}
@@ -66,6 +105,8 @@ class CaseDetailOut(CaseOut):
     evidence: List[Any]
     reviews: List[ReviewOut] = []
     followups: List[FollowupOut] = []
+    notifications: List[NotificationLogOut] = []
+    audit_logs: List[AuditLogOut] = []
 
 class DashboardStatsOut(BaseModel):
     total_cases: int
@@ -74,4 +115,7 @@ class DashboardStatsOut(BaseModel):
     low_priority_count: int
     awaiting_review_count: int
     followup_pending_count: int
+    resolved_count: int
+    avg_response_minutes: int
     priority_distribution: List[dict]
+    request_type_distribution: List[dict]
